@@ -8,30 +8,40 @@ struct AboutView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "character.cursor.ibeam")
-                .font(.system(size: 56))
-                .foregroundStyle(.tint)
+        VStack(spacing: 14) {
+            Image("NookAppIcon")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: Color.black.opacity(0.4), radius: 10, y: 4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.nookBorder, lineWidth: 1)
+                )
             Text("Nook")
                 .font(.largeTitle.bold())
+                .foregroundStyle(.white)
             Text(version)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.nookSecondaryText)
             Text("System-wide text expansion that stays out of your way.")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.nookSecondaryText)
                 .frame(maxWidth: 320)
             Divider()
-                .frame(maxWidth: 320)
+                .overlay(Color.nookBorder)
+                .frame(maxWidth: 280)
             Text("Open source. Snippets are stored locally as JSON in\n~/Library/Application Support/Nook.")
                 .font(.caption)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.nookSecondaryText.opacity(0.8))
             Text("Made with ❤️ by Vlad and Claude")
                 .font(.caption)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.nookSecondaryText.opacity(0.8))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.nookBackground)
         .navigationTitle("About")
     }
 }

@@ -1,31 +1,25 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Snippet library: a filter/search list on the left, editor on the right.
+/// Snippet Studio: responsive list on the left, streamlined editor on the right.
+/// Themed with #151514 background and #EDA101 accent color.
 struct SnippetsView: View {
     @Environment(AppDependencies.self) private var dependencies
 
     @State private var searchText = ""
     @State private var sortOrder = SnippetSearch.SortOrder.name
-    @State private var filter = SnippetFilter.all
     @State private var selectedSnippetID: Snippet.ID?
     @State private var importErrorMessage: String?
 
-    enum SnippetFilter: Hashable {
-        case all
-        case favorites
-        case folder(SnippetFolder.ID)
-    }
-
     var body: some View {
         HSplitView {
-            snippetList
-                .frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
-            detail
-                .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
+            snippetListPane
+                .frame(minWidth: 190, idealWidth: 230, maxWidth: 320)
+            detailPane
+                .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .toolbar { toolbarContent }
-        .navigationTitle("Snippets")
+        .background(Color.nookBackground)
+        .navigationTitle(currentTitle)
         .alert("Import Failed", isPresented: Binding(
             get: { importErrorMessage != nil },
             set: { if !$0 { importErrorMessage = nil } }
@@ -36,81 +30,218 @@ struct SnippetsView: View {
         }
     }
 
+    private var currentTitle: String {
+        switch dependencies.navigationSelection {
+        case .allSnippets:
+            return "All Snippets"
+        case .favorites:
+            return "Favorites"
+        case .folder(let id):
+            return dependencies.snippetStore.folder(withID: id)?.name ?? "Folder"
+        default:
+            return "Snippets"
+        }
+    }
+
+    private var currentFolderID: SnippetFolder.ID? {
+        if case .folder(let id) = dependencies.navigationSelection {
+            return id
+        }
+        return nil
+    }
+
     private var visibleSnippets: [Snippet] {
         let store = dependencies.snippetStore
         var snippets = store.snippets
-        switch filter {
-        case .all: break
-        case .favorites: snippets = snippets.filter(\.isFavorite)
-        case .folder(let id): snippets = snippets.filter { $0.folderID == id }
+        switch dependencies.navigationSelection {
+        case .allSnippets:
+            break
+        case .favorites:
+            snippets = snippets.filter(\.isFavorite)
+        case .folder(let id):
+            snippets = snippets.filter { $0.folderID == id }
+        default:
+            break
         }
         snippets = SnippetSearch.filter(snippets, query: searchText, folders: store.folders)
         return SnippetSearch.sort(snippets, by: sortOrder)
     }
 
-    // MARK: - List
+    // MARK: - List Pane
 
-    private var snippetList: some View {
+    private var snippetListPane: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
+            // Search Bar & Add Button
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.caption)
+                        .foregroundStyle(Color.nookSecondaryText)
+                    TextField("Search…", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.subheadline)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.nookSecondaryText)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
-            }
-            .padding(8)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-            .padding([.horizontal, .top], 10)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
 
-            Picker("Filter", selection: $filter) {
-                Text("All").tag(SnippetFilter.all)
-                Text("Favorites").tag(SnippetFilter.favorites)
-                ForEach(dependencies.snippetStore.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
-                    Text(folder.name).tag(SnippetFilter.folder(folder.id))
+                Button {
+                    addSnippet()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.nookBackground)
+                        .frame(width: 26, height: 26)
+                        .background(Color.nookAccent, in: RoundedRectangle(cornerRadius: 6))
                 }
+                .buttonStyle(.plain)
+                .help("Create New Snippet (⌘N)")
+                .keyboardShortcut("n", modifiers: .command)
             }
-            .labelsHidden()
-            .padding([.horizontal, .top], 10)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
 
+            // Sub-header: Count and Sort Menu
+            HStack {
+                Text("\(visibleSnippets.count) \(visibleSnippets.count == 1 ? "snippet" : "snippets")")
+                    .font(.caption2)
+                    .foregroundStyle(Color.nookSecondaryText)
+
+                Spacer()
+
+                Menu {
+                    Picker("Sort By", selection: $sortOrder) {
+                        ForEach(SnippetSearch.SortOrder.allCases, id: \.self) { order in
+                            Text(order.displayName).tag(order)
+                        }
+                    }
+                    Divider()
+                    Button("Import Snippets…") { importSnippets() }
+                    Button("Export as JSON…") { exportSnippets(format: .json) }
+                    Button("Export as YAML…") { exportSnippets(format: .yaml) }
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 10))
+                        Text(sortOrder.displayName)
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(Color.nookSecondaryText)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+
+            Divider()
+                .overlay(Color.nookBorder)
+
+            // Snippets List
             if visibleSnippets.isEmpty {
-                emptyList
+                emptyState
             } else {
                 List(visibleSnippets, selection: $selectedSnippetID) { snippet in
-                    SnippetRow(snippet: snippet, prefix: dependencies.settingsStore.settings.triggerPrefix)
-                        .tag(snippet.id)
-                        .contextMenu { rowContextMenu(snippet) }
+                    SnippetRow(
+                        snippet: snippet,
+                        prefix: dependencies.settingsStore.settings.triggerPrefix
+                    )
+                    .tag(snippet.id)
+                    .contextMenu { rowContextMenu(snippet) }
                 }
                 .listStyle(.inset)
+                .scrollContentBackground(.hidden)
                 .onDeleteCommand { deleteSelection(fallback: nil) }
             }
         }
+        .background(Color.nookBackground)
     }
 
-    private var emptyList: some View {
-        VStack(spacing: 8) {
+    private var emptyState: some View {
+        VStack(spacing: 10) {
             Spacer()
-            Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
-                .font(.largeTitle)
-                .foregroundStyle(.tertiary)
-            Text(searchText.isEmpty ? "No snippets here yet" : "No matches")
-                .foregroundStyle(.secondary)
+            Image(systemName: searchText.isEmpty ? "character.cursor.ibeam" : "magnifyingglass")
+                .font(.system(size: 30))
+                .foregroundStyle(Color.nookAccent.opacity(0.8))
+
+            Text(searchText.isEmpty ? "No snippets yet" : "No matches")
+                .font(.headline)
+                .foregroundStyle(.white)
+
+            Text(searchText.isEmpty
+                 ? "Add a snippet to expand shortcuts as you type."
+                 : "Try a different search query.")
+                .font(.caption)
+                .foregroundStyle(Color.nookSecondaryText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+
             if searchText.isEmpty {
-                Button("New Snippet") { addSnippet() }
-                    .buttonStyle(.borderedProminent)
+                Button {
+                    addSnippet()
+                } label: {
+                    Label("Create Snippet", systemImage: "plus")
+                        .font(.caption.bold())
+                        .foregroundStyle(Color.nookBackground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.nookAccent, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             }
             Spacer()
         }
         .frame(maxWidth: .infinity)
     }
+
+    // MARK: - Detail Pane
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if let id = selectedSnippetID, let snippet = dependencies.snippetStore.snippet(withID: id) {
+            SnippetEditorView(snippet: snippet, onDelete: {
+                deleteSelection(fallback: id)
+            })
+            .id(id)
+        } else {
+            ContentUnavailableView {
+                Label("Select a Snippet", systemImage: "text.cursor")
+                    .foregroundStyle(.white)
+            } description: {
+                Text("Choose a snippet from the list or create a new one.")
+                    .foregroundStyle(Color.nookSecondaryText)
+            } actions: {
+                Button {
+                    addSnippet()
+                } label: {
+                    Text("New Snippet")
+                        .font(.body.bold())
+                        .foregroundStyle(Color.nookBackground)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Color.nookAccent, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.nookBackground)
+        }
+    }
+
+    // MARK: - Context Menu & Actions
 
     @ViewBuilder
     private func rowContextMenu(_ snippet: Snippet) -> some View {
@@ -129,63 +260,9 @@ struct SnippetsView: View {
         Button("Delete", role: .destructive) { deleteSelection(fallback: snippet.id) }
     }
 
-    // MARK: - Detail
-
-    @ViewBuilder
-    private var detail: some View {
-        if let id = selectedSnippetID, let snippet = dependencies.snippetStore.snippet(withID: id) {
-            SnippetEditorView(snippet: snippet)
-                .id(id)
-        } else {
-            ContentUnavailableView {
-                Label("No Snippet Selected", systemImage: "text.badge.plus")
-            } description: {
-                Text("Select a snippet, or create a new one.")
-            } actions: {
-                Button("New Snippet") { addSnippet() }
-            }
-        }
-    }
-
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItemGroup {
-            Button { addSnippet() } label: {
-                Label("New Snippet", systemImage: "plus")
-            }
-            .help("New Snippet")
-
-            Picker("Sort", selection: $sortOrder) {
-                ForEach(SnippetSearch.SortOrder.allCases, id: \.self) { order in
-                    Text(order.displayName).tag(order)
-                }
-            }
-            .pickerStyle(.menu)
-            .help("Sort order")
-
-            Menu {
-                Button("New Folder…") { addFolder() }
-                if case .folder(let id) = filter {
-                    Button("Rename Folder…") { renameFolder(id) }
-                    Button("Delete Folder", role: .destructive) { deleteFolder(id) }
-                }
-                Divider()
-                Button("Import…") { importSnippets() }
-                Button("Export as JSON…") { exportSnippets(format: .json) }
-                Button("Export as YAML…") { exportSnippets(format: .yaml) }
-            } label: {
-                Label("More", systemImage: "ellipsis.circle")
-            }
-        }
-    }
-
-    // MARK: - Actions
-
     private func addSnippet() {
         var snippet = Snippet(name: "New Snippet")
-        if case .folder(let folderID) = filter {
+        if let folderID = currentFolderID {
             snippet.folderID = folderID
         }
         dependencies.snippetStore.add(snippet)
@@ -196,28 +273,9 @@ struct SnippetsView: View {
         var copy = snippet
         copy.id = UUID()
         copy.name = snippet.name.isEmpty ? "Copy" : "\(snippet.name) Copy"
-        copy.trigger = snippet.trigger + "2"
+        copy.trigger = snippet.trigger.isEmpty ? "copy" : "\(snippet.trigger)2"
         dependencies.snippetStore.add(copy)
         selectedSnippetID = copy.id
-    }
-
-    private func addFolder() {
-        let name = prompt(title: "New Folder", message: "Folder name:", defaultValue: "New Folder")
-        guard let name, !name.isEmpty else { return }
-        let folder = dependencies.snippetStore.addFolder(named: name)
-        filter = .folder(folder.id)
-    }
-
-    private func renameFolder(_ id: SnippetFolder.ID) {
-        guard let folder = dependencies.snippetStore.folder(withID: id) else { return }
-        let name = prompt(title: "Rename Folder", message: "Folder name:", defaultValue: folder.name)
-        guard let name, !name.isEmpty else { return }
-        dependencies.snippetStore.renameFolder(id, to: name)
-    }
-
-    private func deleteFolder(_ id: SnippetFolder.ID) {
-        dependencies.snippetStore.deleteFolder(id)
-        filter = .all
     }
 
     private func deleteSelection(fallback: Snippet.ID?) {
@@ -230,7 +288,7 @@ struct SnippetsView: View {
             return
         }
         dependencies.snippetStore.delete(ids)
-        selectedSnippetID = nil
+        self.selectedSnippetID = nil
     }
 
     private func importSnippets() {
@@ -258,58 +316,79 @@ struct SnippetsView: View {
             importErrorMessage = error.localizedDescription
         }
     }
-
-    /// A small modal text prompt for folder names.
-    private func prompt(title: String, message: String, defaultValue: String) -> String? {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.stringValue = defaultValue
-        alert.accessoryView = field
-        return alert.runModal() == .alertFirstButtonReturn
-            ? field.stringValue.trimmingCharacters(in: .whitespaces)
-            : nil
-    }
 }
+
+// MARK: - Snippet Row
 
 private struct SnippetRow: View {
     let snippet: Snippet
     let prefix: String
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(snippet.isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(prefix + snippet.trigger)
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(snippet.isEnabled ? .primary : .tertiary)
-                    if snippet.isFavorite {
-                        Image(systemName: "star.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.yellow)
-                    }
-                }
-                Text(snippet.name.isEmpty ? snippet.replacement : snippet.name)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                // Monospaced Trigger Pill in Accent
+                Text(prefix + (snippet.trigger.isEmpty ? "…" : snippet.trigger))
+                    .font(.system(.caption, design: .monospaced).bold())
+                    .foregroundStyle(snippet.isEnabled ? Color.nookAccent : Color.nookSecondaryText)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        snippet.isEnabled ? Color.nookAccent.opacity(0.12) : Color.white.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 4)
+                    )
+
+                // Title
+                Text(snippet.name.isEmpty ? "Untitled" : snippet.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(snippet.isEnabled ? .white : Color.nookSecondaryText)
                     .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                // Icons
+                if snippet.isFavorite {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.nookAccent)
+                }
+
+                if !snippet.isEnabled {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.nookSecondaryText)
+                } else if snippet.kind != .text {
+                    Image(systemName: kindIcon)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.nookSecondaryText)
+                }
             }
-            Spacer()
-            if !snippet.isEnabled {
-                Image(systemName: "pause.circle")
-                    .foregroundStyle(.tertiary)
-            }
+
+            // 1-Line Preview
+            Text(previewText)
+                .font(.caption2)
+                .foregroundStyle(Color.nookSecondaryText)
+                .lineLimit(1)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
-    private var icon: String {
+    private var previewText: String {
+        switch snippet.kind {
+        case .text:
+            let singleLine = snippet.replacement.replacingOccurrences(of: "\n", with: " ⏎ ")
+            return singleLine.isEmpty ? "Empty snippet" : singleLine
+        case .script:
+            return "JavaScript snippet"
+        case .richText:
+            return "Rich formatted text"
+        case .image:
+            return "Image snippet"
+        }
+    }
+
+    private var kindIcon: String {
         switch snippet.kind {
         case .text: "textformat"
         case .richText: "textformat.alt"

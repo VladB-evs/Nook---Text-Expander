@@ -47,7 +47,50 @@ final class AppDependencies {
     let coordinator: ExpansionCoordinator
     let keyboardMonitor: KeyboardMonitor
 
-    var selectedSection: SettingsSection = .snippets
+    var navigationSelection: NavigationItem = .allSnippets
+    var selectedSettingsTab: SettingsTab = .general
+
+    var selectedSection: SettingsSection {
+        get {
+            switch navigationSelection {
+            case .allSnippets, .favorites, .folder:
+                return .snippets
+            case .variables:
+                return .variables
+            case .settings(let tab):
+                switch tab {
+                case .general: return .general
+                case .appearance: return .appearance
+                case .permissions: return .permissions
+                case .advanced: return .advanced
+                }
+            case .about:
+                return .about
+            }
+        }
+        set {
+            switch newValue {
+            case .snippets:
+                navigationSelection = .allSnippets
+            case .variables:
+                navigationSelection = .variables
+            case .general:
+                selectedSettingsTab = .general
+                navigationSelection = .settings(.general)
+            case .appearance:
+                selectedSettingsTab = .appearance
+                navigationSelection = .settings(.appearance)
+            case .permissions:
+                selectedSettingsTab = .permissions
+                navigationSelection = .settings(.permissions)
+            case .advanced:
+                selectedSettingsTab = .advanced
+                navigationSelection = .settings(.advanced)
+            case .about:
+                navigationSelection = .about
+            }
+        }
+    }
 
     init(persistence: any SnippetPersisting = JSONPersistence()) {
         let logger = DebugLogger()

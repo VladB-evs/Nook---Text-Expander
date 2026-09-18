@@ -1,213 +1,532 @@
 import SwiftUI
 
-/// Edits a single snippet.
-///
-/// The snippet is edited through a local `@State` draft so every field is a
-/// plain, stable input box (no cursor jumping, no stale values). The draft is
-/// written back to the store on change, which persists it with a short
-/// debounce — there is no explicit save. The parent gives this view an
-/// `.id(snippet.id)` so selecting a different snippet reloads the draft.
+/// Streamlined, responsive snippet editor themed in #151514 and #EDA101.
+/// Flexes gracefully with window resize with zero clipping.
 struct SnippetEditorView: View {
     @Environment(AppDependencies.self) private var dependencies
 
     @State private var draft: Snippet
+    var onDelete: (() -> Void)?
+
     @State private var newTag = ""
     @State private var scriptOutput: String?
+    @State private var showOptions = false
+    @State private var showDeleteConfirm = false
+    @State private var showPromptFieldAlert = false
+    @State private var promptFieldName = ""
 
-    init(snippet: Snippet) {
+    init(snippet: Snippet, onDelete: (() -> Void)? = nil) {
         _draft = State(initialValue: snippet)
+        self.onDelete = onDelete
     }
 
     var body: some View {
-        Form {
-            basicsSection
-            contentSection
-            if draft.kind == .richText { richTextSection }
-            if draft.kind == .image { imageSection }
-            optionsSection
-            organizationSection
-            if draft.kind == .text || draft.kind == .script { previewSection }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                headerRow
+
+                Divider()
+                    .overlay(Color.nookBorder)
+
+                triggerBlock
+
+                contentBlock
+
+                helperToolbar
+
+                if draft.kind == .text && !draft.replacement.isEmpty {
+                    livePreviewBox
+                }
+
+                Divider()
+                    .overlay(Color.nookBorder)
+
+                moreOptionsDisclosure
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
+        .background(Color.nookBackground)
         .onChange(of: draft) { _, updated in
             dependencies.snippetStore.update(updated)
         }
+        .confirmationDialog(
+            "Delete Snippet",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Snippet", role: .destructive) {
+                onDelete?()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Delete “\(draft.name.isEmpty ? draft.trigger : draft.name)”? This cannot be undone.")
+        }
+        .alert("Ask for Input at Expansion", isPresented: $showPromptFieldAlert) {
+            TextField("Field Name (e.g. client)", text: $promptFieldName)
+            Button("Cancel", role: .cancel) {}
+            Button("Insert") {
+                let trimmed = promptFieldName.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    insertText("{{\(trimmed)}}")
+                }
+            }
+        } message: {
+            Text("Nook will pop up a quick prompt for this value when the snippet expands.")
+        }
     }
 
-    // MARK: - Sections
+    // MARK: - Header Row
 
-    private var basicsSection: some View {
-        Section("Basics") {
-            LabeledField("Name") {
-                TextField("Snippet name", text: $draft.name)
-                    .textFieldStyle(.roundedBorder)
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 8) {
+            TextField("Snippet Name", text: $draft.name)
+                .font(.title3.bold())
+                .textFieldStyle(.plain)
+                .foregroundStyle(.white)
+
+            Spacer(minLength: 6)
+
+            // Favorite button
+            Button {
+                draft.isFavorite.toggle()
+            } label: {
+                Image(systemName: draft.isFavorite ? "star.fill" : "star")
+                    .font(.body)
+                    .foregroundStyle(draft.isFavorite ? Color.nookAccent : Color.nookSecondaryText)
             }
-            LabeledField("Trigger") {
-                HStack(spacing: 4) {
-                    Text(dependencies.settingsStore.settings.triggerPrefix)
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    TextField("trigger", text: $draft.trigger)
-                        .font(.system(.body, design: .monospaced))
-                        .textFieldStyle(.roundedBorder)
-                }
-            }
-            LabeledField("Type") {
-                Picker("Type", selection: $draft.kind) {
-                    ForEach(SnippetKind.allCases, id: \.self) { kind in
-                        Text(kind.displayName).tag(kind)
-                    }
-                }
+            .buttonStyle(.plain)
+            .help(draft.isFavorite ? "Remove Favorite" : "Add Favorite")
+
+            // Enabled toggle switch
+            Toggle("", isOn: $draft.isEnabled)
                 .labelsHidden()
-                .pickerStyle(.segmented)
+                .toggleStyle(.switch)
+                .tint(Color.nookAccent)
+                .help(draft.isEnabled ? "Snippet is active" : "Snippet is paused")
+
+            // Delete button
+            if onDelete != nil {
+                Button {
+                    showDeleteConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.body)
+                        .foregroundStyle(Color.nookSecondaryText)
+                }
+                .buttonStyle(.plain)
+                .help("Delete snippet")
             }
         }
     }
 
-    private var contentSection: some View {
-        Section(draft.kind == .script ? "Script" : "Replacement") {
+    // MARK: - Trigger Input
+
+    private var triggerBlock: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("SHORTCUT TRIGGER")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color.nookSecondaryText)
+
+            HStack(spacing: 0) {
+                Text(dependencies.settingsStore.settings.triggerPrefix)
+                    .font(.system(.body, design: .monospaced).bold())
+                    .foregroundStyle(Color.nookBackground)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.nookAccent)
+
+                TextField("shortcut (e.g. email)", text: $draft.trigger)
+                    .font(.system(.body, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+            .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
+        }
+    }
+
+    // MARK: - Content Editor
+
+    private var contentBlock: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("EXPANSION")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.nookSecondaryText)
+
+                Spacer()
+
+                Menu {
+                    ForEach(SnippetKind.allCases, id: \.self) { kind in
+                        Button(kind.displayName) { draft.kind = kind }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(draft.kind.displayName)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.nookSecondaryText)
+                }
+                .menuStyle(.borderlessButton)
+            }
+
+            switch draft.kind {
+            case .text:
+                textCanvas
+            case .script:
+                scriptCanvas
+            case .richText:
+                richTextCanvas
+            case .image:
+                imageCanvas
+            }
+        }
+    }
+
+    private var textCanvas: some View {
+        ZStack(alignment: .topLeading) {
             TextEditor(text: $draft.replacement)
-                .font(.system(.body, design: draft.kind == .script ? .monospaced : .default))
+                .font(.system(.body, design: .default))
+                .scrollContentBackground(.hidden)
+                .padding(8)
                 .frame(minHeight: 120)
-                .overlay(alignment: .topLeading) {
-                    if draft.replacement.isEmpty {
-                        Text(draft.kind == .script ? "return \"value\";" : "Replacement text…")
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 8)
-                            .padding(.leading, 5)
-                            .allowsHitTesting(false)
-                    }
-                }
+                .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
 
-            if draft.kind == .text {
-                Text("Use {{variables}} for dynamic values, {{fillIn}} to prompt for input, and | for the cursor position (\\| for a literal pipe).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if draft.kind == .script {
-                LabeledField("Language") {
-                    Picker("Language", selection: $draft.scriptLanguage) {
-                        ForEach(ScriptLanguage.allCases, id: \.self) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    }
-                    .labelsHidden()
-                }
-                Text("The script's return value replaces the trigger.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if draft.replacement.isEmpty {
+                Text("Type replacement text…")
+                    .font(.body)
+                    .foregroundStyle(Color.nookSecondaryText.opacity(0.6))
+                    .padding(12)
+                    .allowsHitTesting(false)
             }
         }
     }
 
-    private var richTextSection: some View {
-        Section("Formatted Content") {
+    private var scriptCanvas: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $draft.replacement)
+                    .font(.system(.body, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 110)
+                    .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
+
+                if draft.replacement.isEmpty {
+                    Text("// JavaScript return value is expanded\nreturn \"Today is \" + new Date().toDateString();")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(Color.nookSecondaryText.opacity(0.6))
+                        .padding(12)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            HStack {
+                Button {
+                    runScriptPreview()
+                } label: {
+                    Label("Test Script", systemImage: "play.fill")
+                        .font(.caption2.bold())
+                        .foregroundStyle(Color.nookBackground)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.nookAccent, in: RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+
+                if let scriptOutput {
+                    Text(scriptOutput)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var richTextCanvas: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if let rtf = draft.rtfData,
-               let attributed = try? NSAttributedString(data: rtf, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+               let attributed = try? NSAttributedString(
+                data: rtf,
+                options: [.documentType: NSAttributedString.DocumentType.rtf],
+                documentAttributes: nil
+               ) {
                 Text(AttributedString(attributed))
+                    .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
             } else {
-                Text("No formatted content captured yet. The plain replacement above is used as a fallback.")
+                Text("No formatted content captured yet.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.nookSecondaryText)
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
             }
-            Button("Capture Formatted Text from Clipboard") { captureRTF() }
+
+            Button {
+                captureRTF()
+            } label: {
+                Label("Paste Rich Text from Clipboard", systemImage: "doc.on.clipboard")
+                    .font(.caption)
+                    .foregroundStyle(Color.nookAccent)
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    private var imageSection: some View {
-        Section("Image") {
+    private var imageCanvas: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if let data = draft.imageData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxHeight: 160)
+                    .frame(maxHeight: 140)
+                    .padding(8)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
             } else {
-                Text("No image yet. Copy an image, then capture it below.")
+                Text("No image captured yet.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.nookSecondaryText)
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
             }
-            Button("Capture Image from Clipboard") { captureImage() }
+
+            Button {
+                captureImage()
+            } label: {
+                Label("Paste Image from Clipboard", systemImage: "photo.badge.arrow.down")
+                    .font(.caption)
+                    .foregroundStyle(Color.nookAccent)
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    private var optionsSection: some View {
-        Section("Options") {
-            Toggle("Enabled", isOn: $draft.isEnabled)
-            Toggle("Favorite", isOn: $draft.isFavorite)
-            Toggle("Case sensitive", isOn: $draft.isCaseSensitive)
-            Toggle("Whole word only", isOn: $draft.wholeWordOnly)
-            LabeledField("Expansion method") {
-                Picker("Expansion method", selection: $draft.expansionMethod) {
-                    ForEach(ExpansionMethodPreference.allCases, id: \.self) { method in
-                        Text(method.displayName).tag(method)
-                    }
+    // MARK: - Helper Toolbar
+
+    private var helperToolbar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Section("Date & Time") {
+                    Button("Date (YYYY-MM-DD)") { insertText("{{date}}") }
+                    Button("Time (HH:MM)") { insertText("{{time}}") }
+                    Button("Date & Time") { insertText("{{datetime}}") }
+                    Button("Year") { insertText("{{year}}") }
+                    Button("Weekday") { insertText("{{weekday}}") }
                 }
-                .labelsHidden()
-            }
-        }
-    }
 
-    private var organizationSection: some View {
-        Section("Organization") {
-            LabeledField("Folder") {
-                Picker("Folder", selection: $draft.folderID) {
-                    Text("None").tag(SnippetFolder.ID?.none)
-                    ForEach(dependencies.snippetStore.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
-                        Text(folder.name).tag(SnippetFolder.ID?.some(folder.id))
-                    }
+                Section("System") {
+                    Button("Clipboard Text") { insertText("{{clipboard}}") }
+                    Button("Selected Text") { insertText("{{selection}}") }
+                    Button("Random UUID") { insertText("{{uuid}}") }
+                    Button("Username") { insertText("{{username}}") }
                 }
-                .labelsHidden()
-            }
-            tagsField
-        }
-    }
 
-    private var tagsField: some View {
-        LabeledField("Tags") {
-            VStack(alignment: .leading, spacing: 8) {
-                if !draft.tags.isEmpty {
-                    FlowLayout(spacing: 6) {
-                        ForEach(draft.tags, id: \.self) { tag in
-                            TagChip(text: tag) { removeTag(tag) }
+                if !dependencies.settingsStore.settings.customVariables.isEmpty {
+                    Section("Custom Variables") {
+                        ForEach(dependencies.settingsStore.settings.customVariables) { v in
+                            Button("{{\(v.name)}}") { insertText("{{\(v.name)}}") }
                         }
                     }
                 }
-                HStack {
-                    TextField("Add a tag", text: $newTag)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { addTag() }
-                    Button("Add") { addTag() }
-                        .disabled(newTag.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                Section("Interactive") {
+                    Button("Prompt for Fill-in…") {
+                        promptFieldName = ""
+                        showPromptFieldAlert = true
+                    }
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "curlybraces")
+                    Text("Variable")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.nookAccent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.nookAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                insertText("|")
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "character.cursor.ibeam")
+                    Text("Cursor Stop")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.nookSecondaryText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .help("Inserts '|'. The cursor jumps here after expansion.")
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Live Preview Box
+
+    private var livePreviewBox: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("PREVIEW")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.nookSecondaryText)
+
+            Text(livePreview)
+                .font(.system(.caption, design: .default))
+                .foregroundStyle(.white)
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.nookBorder, lineWidth: 1))
+        }
+    }
+
+    // MARK: - More Options
+
+    private var moreOptionsDisclosure: some View {
+        DisclosureGroup(isExpanded: $showOptions) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Folder
+                HStack {
+                    Text("Folder")
+                        .font(.caption)
+                        .foregroundStyle(Color.nookSecondaryText)
+                        .frame(width: 100, alignment: .leading)
+
+                    Picker("Folder", selection: $draft.folderID) {
+                        Text("None").tag(SnippetFolder.ID?.none)
+                        ForEach(dependencies.snippetStore.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { f in
+                            Text(f.name).tag(SnippetFolder.ID?.some(f.id))
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                // Delivery Method
+                HStack {
+                    Text("Delivery")
+                        .font(.caption)
+                        .foregroundStyle(Color.nookSecondaryText)
+                        .frame(width: 100, alignment: .leading)
+
+                    Picker("Delivery", selection: $draft.expansionMethod) {
+                        ForEach(ExpansionMethodPreference.allCases, id: \.self) { method in
+                            Text(method.displayName).tag(method)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                // Matching Toggles
+                HStack(spacing: 16) {
+                    Toggle("Case sensitive", isOn: $draft.isCaseSensitive)
+                        .font(.caption)
+                        .foregroundStyle(Color.nookSecondaryText)
+                    Toggle("Whole word only", isOn: $draft.wholeWordOnly)
+                        .font(.caption)
+                        .foregroundStyle(Color.nookSecondaryText)
+                }
+
+                // Tags
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Tags")
+                        .font(.caption)
+                        .foregroundStyle(Color.nookSecondaryText)
+
+                    if !draft.tags.isEmpty {
+                        FlowLayout(spacing: 4) {
+                            ForEach(draft.tags, id: \.self) { tag in
+                                HStack(spacing: 3) {
+                                    Text(tag)
+                                        .font(.caption2)
+                                        .foregroundStyle(.white)
+                                    Button {
+                                        draft.tags.removeAll { $0 == tag }
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8))
+                                            .foregroundStyle(Color.nookSecondaryText)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.nookCardHover, in: Capsule())
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        TextField("Add tag…", text: $newTag)
+                            .textFieldStyle(.plain)
+                            .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(Color.nookCard, in: RoundedRectangle(cornerRadius: 4))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.nookBorder, lineWidth: 1))
+                            .onSubmit { addTag() }
+
+                        Button("Add") { addTag() }
+                            .font(.caption)
+                            .disabled(newTag.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+            .padding(.top, 8)
+        } label: {
+            HStack {
+                Text("More Options")
+                    .font(.caption.bold())
+                    .foregroundStyle(Color.nookSecondaryText)
+                Spacer()
+                Text(optionsSummary)
+                    .font(.caption2)
+                    .foregroundStyle(Color.nookSecondaryText.opacity(0.8))
             }
         }
     }
 
-    private var previewSection: some View {
-        Section("Preview") {
-            switch draft.kind {
-            case .text:
-                Text(livePreview)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            case .script:
-                HStack {
-                    Button("Run Preview") { runScriptPreview() }
-                    if let scriptOutput {
-                        Text(scriptOutput)
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-            default:
-                EmptyView()
-            }
+    private var optionsSummary: String {
+        var parts: [String] = []
+        if let folderID = draft.folderID, let f = dependencies.snippetStore.folder(withID: folderID) {
+            parts.append(f.name)
         }
+        if !draft.tags.isEmpty {
+            parts.append("\(draft.tags.count) tags")
+        }
+        if draft.isCaseSensitive {
+            parts.append("Case sensitive")
+        }
+        return parts.isEmpty ? "Default" : parts.joined(separator: " · ")
     }
 
     // MARK: - Actions
+
+    private func insertText(_ text: String) {
+        draft.replacement.append(text)
+    }
 
     private func addTag() {
         let tag = newTag.trimmingCharacters(in: .whitespaces)
@@ -216,15 +535,11 @@ struct SnippetEditorView: View {
         newTag = ""
     }
 
-    private func removeTag(_ tag: String) {
-        draft.tags.removeAll { $0 == tag }
-    }
-
     private func runScriptPreview() {
         do {
             scriptOutput = try dependencies.scriptEngine.run(draft.replacement, language: draft.scriptLanguage)
         } catch {
-            scriptOutput = error.localizedDescription
+            scriptOutput = "Error: \(error.localizedDescription)"
         }
     }
 
@@ -261,52 +576,9 @@ struct SnippetEditorView: View {
     }
 }
 
-/// A label above its control, used to make each editor field self-explanatory.
-private struct LabeledField<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            content
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-/// A removable tag pill.
-private struct TagChip: View {
-    let text: String
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(text)
-                .font(.caption)
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption2)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.quaternary, in: Capsule())
-    }
-}
-
 /// Minimal wrapping layout so tag chips flow onto multiple lines.
 struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
+    var spacing: CGFloat = 4
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
@@ -350,3 +622,4 @@ struct FlowLayout: Layout {
         }
     }
 }
+

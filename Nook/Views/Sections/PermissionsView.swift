@@ -62,6 +62,8 @@ struct PermissionsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.nookBackground)
         .navigationTitle("Permissions")
         .task {
             dependencies.permissions.refresh()
@@ -77,7 +79,7 @@ struct PermissionsView: View {
             active ? activeText : inactiveText,
             systemImage: active ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
         )
-        .foregroundStyle(active ? .green : .orange)
+        .foregroundStyle(active ? Color.green : Color.nookAccent)
     }
 }
 

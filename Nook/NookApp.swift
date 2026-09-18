@@ -20,9 +20,10 @@ struct NookApp: App {
         Window("Nook", id: WindowID.main) {
             RootView()
                 .environment(dependencies)
-                .preferredColorScheme(dependencies.settingsStore.settings.appearance.colorScheme)
+                .preferredColorScheme(dependencies.settingsStore.settings.appearance == .light ? .light : .dark)
+                .frame(minWidth: 640, minHeight: 400)
         }
-        .defaultSize(width: 780, height: 540)
+        .defaultSize(width: 820, height: 520)
     }
 }
 
@@ -47,7 +48,8 @@ private struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Image(systemName: dependencies.isEffectivelyEnabled ? "character.cursor.ibeam" : "pause.circle")
+        Image(dependencies.isEffectivelyEnabled ? "MenuBarIcon" : "MenuBarIconPaused")
+            .renderingMode(.template)
             .task {
                 dependencies.start()
                 if !dependencies.permissions.accessibilityGranted {

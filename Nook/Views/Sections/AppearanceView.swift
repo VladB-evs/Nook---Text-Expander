@@ -18,11 +18,23 @@ struct AppearanceView: View {
 
             Section {
                 LabeledContent("Menu bar icon") {
-                    HStack(spacing: 12) {
-                        Label("Active", systemImage: "character.cursor.ibeam")
-                        Label("Paused", systemImage: "pause.circle")
+                    HStack(spacing: 16) {
+                        HStack(spacing: 6) {
+                            Image("MenuBarIcon")
+                                .renderingMode(.template)
+                                .foregroundStyle(Color.nookText)
+                            Text("Active")
+                                .foregroundStyle(Color.nookText)
+                        }
+                        HStack(spacing: 6) {
+                            Image("MenuBarIconPaused")
+                                .renderingMode(.template)
+                                .foregroundStyle(Color.nookSecondaryText)
+                            Text("Paused")
+                                .foregroundStyle(Color.nookSecondaryText)
+                        }
                     }
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
                 }
                 Text("The icon switches automatically to show whether expansion is currently active.")
                     .font(.caption)
@@ -30,6 +42,8 @@ struct AppearanceView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.nookBackground)
         .navigationTitle("Appearance")
     }
 }

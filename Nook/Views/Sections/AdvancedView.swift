@@ -54,6 +54,8 @@ struct AdvancedView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.nookBackground)
         .navigationTitle("Advanced")
     }
 }

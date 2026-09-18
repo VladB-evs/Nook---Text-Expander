@@ -67,6 +67,8 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.nookBackground)
         .navigationTitle("General")
         .onAppear {
             guard !isLoaded else { return }
